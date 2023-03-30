@@ -1,8 +1,97 @@
 ---
 title: "Activity 8 - Mini-competition"
-output: github_document
+output: 
+  prettydoc::html_pretty:
+  theme: architect
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+```{r}
+library(tidyverse)
+library(forecast)
+```
+
+
+```{r}
+data <- read_csv("data/inventory.csv")
+```
+
+```{r}
+weekly_sales <- data %>% select(week, sold) %>% group_by(week) %>% summarise(tsold = sum(sold));
+weekly_sales %>% 
+  ggplot(aes(x=week, y=tsold)) +
+    geom_line() +
+    labs(title = 'Weekly Total Sales', x = 'Week', y = 'Total Sales') +
+    theme_bw()
+```
+
+
+```{r}
+# ARIMA on weekly sales
+fit <- auto.arima(weekly_sales$tsold, seasonal = TRUE)
+fit
+```
+
+```{r}
+prediction <- forecast(fit);
+plot(prediction)
+```
+
+```{r}
+predict_54_55 <- forecast(fit, h=2, level=c(80, 95))
+print(predict_54_55)
+plot(predict_54_55)
+```
+
+```{r}
+# ANN
+library(neuralnet)
+```
+
+```{r}
+items <- data %>% group_by(item_no) %>% distinct(item_no)
+items$index <- seq(1, length(items$item_no))
+data$item_index = 0;
+for(i in 1:nrow(data)) {
+  data[i, "item_index"] = items[items$item_no==data$item_no[i], ]$index
+}
+```
+
+
+```{r}
+min_sold = min(data[,"sold"])
+max_sold = max(data[,"sold"])
+data <- data %>% mutate(sold_norm = ((sold - min_sold) / (max_sold - min_sold)))
+train_data <- data %>% filter(week < 52)
+test_data <- data %>% filter(week > 51) 
+```
+
+
+```{r}
+nn <- neuralnet(sold_norm ~ item_index + week, 
+                data = train_data, 
+                hidden = 5, err.fct = "sse",
+                linear.output = FALSE,
+                lifesign = 'minimal',
+                rep = 2,
+                algorithm = "rprop+",
+                stepmax = 100000);
+```
+
+```{r}
+nn$result.matrix
+```
+
+```{r}
+# Prediction
+output <- compute(nn, rep = 2, test_data %>% select(sold_norm, item_index, week))
+predicted <- test_data
+predicted$predicted_sold_norm = output$net.result
+predicted <- predicted %>% 
+  mutate(predicted_sold = (predicted_sold_norm * (max_sold - min_sold)) + min_sold)
+head(predicted)
+```
+
